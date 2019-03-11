@@ -1,6 +1,6 @@
 # Bay Area Bike Share - Spatio-Temporal Analysis and Interactive Map
 
-This repo contains two challenges and their solutions.
+This repo contains two challenges and their solutions. For details, read the challenge description in the two subfolders.
 
 ## Motivation
  
@@ -9,4 +9,4 @@ This repo contains two challenges and their solutions.
 
 ## Data
 
-Trips from bike share providers in San Francisco Bay Area. For details, read the challenge description in the two subfolders.
+Trips from bike share providers in San Francisco Bay Area. 
