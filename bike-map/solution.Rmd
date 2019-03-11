@@ -1,0 +1,224 @@
+---
+title: "Bay Area Bike Share - Map"
+author: "Oskar Triebe"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 6
+---
+
+```{r setup, include=FALSE}
+# knitr options
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE}
+library(tidyverse)
+library(stringr)
+library(leaflet)
+library(sf)
+```
+
+
+
+# Mapping Bay Area Bike Share
+
+## Description - Bay Area Bike Share 
+
+Shared city bikes have been a great success in many European cities, such as Berlin, and recently also in the US, with NYC having reached 22 million trips taken. Bikes are an essential piece of multimodal transportation with is the most sustainable and effective form of urban transportation. However, most cities still struggle make the transition from long to short distance trips easy and fluid. Therefore it is important to understand how humans use these systems, and how they could be improved. Luckily, most of the modern bike share systems collect data about the use of their offerings and share it publicly to advance the state of development.
+
+Todd Schneider has created some amazing analyses with NYC taxi and bike data:
+
+*	[NYC Taxi](http://toddwschneider.com/posts/analyzing-1-1-billion-nyc-taxi-and-uber-trips-with-a-vengeance/) 
+* [NYC Bike](http://toddwschneider.com/posts/a-tale-of-twenty-two-million-citi-bikes-analyzing-the-nyc-bike-share-system/)
+
+
+
+In this challenge, we will create interactive maps that visualize the biking activities in the Bay Area.
+
+## Load Data
+OPTIONAL:
+The data is available online (3 years, 983,648  trips) from the [Bay Area Bike Share website](http://www.bayareabikeshare.com/open-data).
+
+* Download the station and trip data for all years directly from the source and process it so that you can use it. 
+
+SHORTCUT:
+To save your time and nerves, you can find the pre-wrangled data on Box:  https://stanford.box.com/v/bike-data. 
+
+* View the README.
+* Download the station and trip data `station.rds` `trip.rds` from Box
+* Use `read_rds()` to read in the files
+
+
+```{r load data}
+##==SOLUTION==##
+## Base paths
+path_base <- 'path/to/downloaded_data/'
+path_year_all <- str_c(path_base, 'solution_data/')
+
+## Paths Year all
+path_station_all <- str_c(path_year_all, 'station.rds')
+# path_status_all <- str_c(path_year_all, 'status.rds')
+path_trip_all <- str_c(path_year_all, 'trip.rds')
+# path_weather_all <- str_c(path_year_all, 'weather.rds')
+
+station <- read_rds(path_station_all)
+trip <- read_rds(path_trip_all)
+##==SOLUTION==##
+```
+
+
+## Prepare Data 
+Create a new tibble `routes` for each bidirectional route (combining trip data in both directions). We will use station names as identifiers. 
+
+* Sort `station_1`,  `station_2` such that `station_1` comes first in the alphabet compared to `station_2`.
+* arrange by `station_1`, `station_2`
+
+```{r route pairs}
+##==SOLUTION==##
+routes <- 
+  trip %>%
+  filter(start_station != end_station) %>% 
+  mutate(
+    station_1 = if_else(start_station < end_station, start_station, end_station),
+    station_2 = if_else(start_station > end_station, start_station, end_station)) %>% 
+  group_by(station_1, station_2) %>% 
+  summarise(nn = n()) %>% 
+  arrange(-nn, station_1, station_2)
+
+routes %>% write_rds(str_c(path_year_all, 'solution_routes.rds'))
+##==SOLUTION==##
+```
+
+Analyze the travel frequency of routes:
+
+```{r frequent routes}
+##==SOLUTION==##
+routes %>% 
+  ggplot(aes(nn)) +
+  geom_histogram(binwidth = 100)
+
+routes %>% 
+  ggplot(aes(log10(nn))) +
+  geom_histogram(binwidth = 0.1)
+##==SOLUTION==##
+```
+
+
+## Mapping the data
+
+### Stations
+
+* Visualize the station data using leaflet
+* Display name and dockcount of the stations
+
+```{r leaflet stations, message=FALSE}
+##==SOLUTION==##
+map_stations <- 
+  leaflet(station) %>% 
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addCircleMarkers(radius = ~dockcount, 
+                   color = 'white', fillColor = 'red',
+                   opacity = 0.2) %>% 
+  addMarkers(label = ~name)
+
+map_stations
+##==SOLUTION==##
+```
+
+### Route Nodes
+
+* Create a `sf` tibble which contains the geometric details for each of the routes.
+
+Hint: You might want to look at `st_linestring()`, `st_sfc()` and `st_as_sf()`. Hacky solutions are possible.
+
+```{r routes to lines, better}
+##==BETTER SOLUTION==##
+route_nodes <- 
+  routes %>% ungroup() %>% 
+  inner_join(station %>% select(name, lng1 = long, lat1 = lat), 
+            by = c('station_1' = 'name'))  %>% 
+  inner_join(station %>% select(name, lng2 = long, lat2 = lat), 
+            by = c('station_2' = 'name')) %>% 
+  group_by(station_1, station_2, nn) %>% 
+  nest() %>% 
+  mutate(
+    geometry = map(data, ~st_linestring(matrix(unlist(.), 
+                                               ncol = 2, 
+                                               byrow = TRUE)))
+    ) %>% 
+  mutate(geometry = st_sfc(geometry)) %>%
+  select(-data) %>% 
+  st_as_sf()
+route_nodes %>% write_rds(str_c(path_year_all, 'solution_route_nodes.rds'))
+##==BETTER SOLUTION==##
+```
+
+
+```{r routes to lines}
+##==SOLUTION==##
+# route_nodes <- 
+#   routes %>% ungroup() %>% 
+#   inner_join(station %>% select(name, lat1 = lat, lng1 = long), 
+#             by = c('station_1' = 'name'))  %>% 
+#   inner_join(station %>% select(name, lat2 = lat, lng2 = long), 
+#             by = c('station_2' = 'name')) %>% 
+#   mutate(id = row_number())
+# 
+# lines = list()
+# for (i in route_nodes$id) {
+#   lines[i] = list(st_linestring(
+#     rbind(c(route_nodes$lng1[i], route_nodes$lat1[i]), 
+#           c(route_nodes$lng2[i], route_nodes$lat2[i]))))
+# }
+# 
+# route_nodes <- 
+#   route_nodes %>% 
+#   mutate(geometry = st_sfc(lines)) %>% 
+#   st_as_sf()
+# route_nodes %>% write_rds(str_c(path_year_all, 'solution_route_nodes.rds'))
+##==SOLUTION==##
+```
+
+
+Now we create a map:
+
+* Map all the routes with an indicative line
+* Map the node strength by varying its weight based on frequency
+
+```{r node strengths map, message=FALSE}
+##==SOLUTION==##
+map_routes <- 
+  leaflet(route_nodes) %>% 
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addPolylines(weight = ~nn/500, opacity = 0.2) %>% 
+    addPolylines(weight = 0.1, opacity = 0.5, color = 'black')
+map_routes
+##==SOLUTION==##
+```
+
+### Combined Map
+
+* Create a final map combining both maps
+
+```{r combined map, message=FALSE, out.width='100%'}
+##==SOLUTION==##
+map_comb <- 
+  leaflet(station) %>% 
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addCircleMarkers(radius = ~dockcount, 
+                   color = 'white', fillColor = 'red',
+                   opacity = 0.2) %>% 
+  addPolylines(data = route_nodes, weight = ~nn/500, opacity = 0.2) %>% 
+  # addPolylines(data = route_nodes, weight = 0.1, opacity = 0.5, color = 'black') %>% 
+  addMarkers(label = ~name)
+
+map_comb
+##==SOLUTION==##
+```
+
+
+
+
+
+
